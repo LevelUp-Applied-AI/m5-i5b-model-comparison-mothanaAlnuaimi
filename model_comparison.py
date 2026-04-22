@@ -35,7 +35,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
-
+from sklearn.model_selection import train_test_split
 
 NUMERIC_FEATURES = ["tenure", "monthly_charges", "total_charges",
                     "num_support_calls", "senior_citizen",
@@ -56,10 +56,19 @@ def load_and_preprocess(filepath="data/telecom_churn.csv", random_state=42):
         Tuple (X_train, X_test, y_train, y_test) where X contains only
         NUMERIC_FEATURES and y is the `churned` column.
     """
-    # TODO: Load the CSV, select NUMERIC_FEATURES into X, use `churned` as y,
-    #       split 80/20 with stratify=y.
-    pass
+    df = pd.read_csv(filepath)
 
+    X = df[NUMERIC_FEATURES]
+    y = df["churned"]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        stratify=y,
+        random_state=random_state
+    )
+    return X_train, X_test, y_train, y_test
 
 def define_models():
     """Define 6 model configurations for comparison.
@@ -84,10 +93,56 @@ def define_models():
         Names: 'Dummy', 'LR_default', 'LR_balanced', 'DT_depth5',
                'RF_default', 'RF_balanced'.
     """
-    # TODO: Build a Pipeline for each model. LR pipelines include
-    #       StandardScaler; tree pipelines use 'passthrough' for the
-    #       scaler step. All models with randomness use random_state=42.
-    pass
+    """Define the required model pipelines and return them as a dict."""
+    models = {
+        "Dummy": Pipeline([
+            ("scaler", "passthrough"),
+            ("model", DummyClassifier(strategy="most_frequent"))
+        ]),
+
+        "LR_default": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", LogisticRegression(max_iter=1000, random_state=42))
+        ]),
+
+        "LR_balanced": Pipeline([
+            ("scaler", StandardScaler()),
+            ("model", LogisticRegression(
+                class_weight="balanced",
+                max_iter=1000,
+                random_state=42
+            ))
+        ]),
+
+        "DT_depth5": Pipeline([
+            ("scaler", "passthrough"),
+            ("model", DecisionTreeClassifier(
+                max_depth=5,
+                random_state=42
+            ))
+        ]),
+
+        "RF_default": Pipeline([
+            ("scaler", "passthrough"),
+            ("model", RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                random_state=42
+            ))
+        ]),
+
+        "RF_balanced": Pipeline([
+            ("scaler", "passthrough"),
+            ("model", RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                class_weight="balanced",
+                random_state=42
+            ))
+        ]),
+    }
+
+    return models
 
 
 def run_cv_comparison(models, X, y, n_splits=5, random_state=42):
@@ -110,10 +165,51 @@ def run_cv_comparison(models, X, y, n_splits=5, random_state=42):
         f1_mean, f1_std, pr_auc_mean, pr_auc_std.
         One row per model (6 rows total).
     """
-    # TODO: Create a StratifiedKFold splitter. For each model, loop over
-    #       folds: fit on train, predict on val, compute the 5 metrics.
-    #       Collect fold scores, compute mean ± std. Return as DataFrame.
-    pass
+    skf = StratifiedKFold(
+        n_splits=n_splits,
+        shuffle=True,
+        random_state=random_state
+    )
+
+    results = []
+
+    for model_name, model in models.items():
+        accuracy_scores = []
+        precision_scores = []
+        recall_scores = []
+        f1_scores = []
+        pr_auc_scores = []
+
+        for train_idx, val_idx in skf.split(X, y):
+            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+            model.fit(X_train, y_train)
+
+            y_pred = model.predict(X_val)
+            y_prob = model.predict_proba(X_val)[:, 1]
+
+            accuracy_scores.append(accuracy_score(y_val, y_pred))
+            precision_scores.append(precision_score(y_val, y_pred, zero_division=0))
+            recall_scores.append(recall_score(y_val, y_pred, zero_division=0))
+            f1_scores.append(f1_score(y_val, y_pred, zero_division=0))
+            pr_auc_scores.append(average_precision_score(y_val, y_prob))
+
+        results.append({
+            "model": model_name,
+            "accuracy_mean": np.mean(accuracy_scores),
+            "accuracy_std": np.std(accuracy_scores),
+            "precision_mean": np.mean(precision_scores),
+            "precision_std": np.std(precision_scores),
+            "recall_mean": np.mean(recall_scores),
+            "recall_std": np.std(recall_scores),
+            "f1_mean": np.mean(f1_scores),
+            "f1_std": np.std(f1_scores),
+            "pr_auc_mean": np.mean(pr_auc_scores),
+            "pr_auc_std": np.std(pr_auc_scores)
+        })
+
+    return pd.DataFrame(results)
 
 
 def save_comparison_table(results_df, output_path="results/comparison_table.csv"):
@@ -123,8 +219,7 @@ def save_comparison_table(results_df, output_path="results/comparison_table.csv"
         results_df: DataFrame from run_cv_comparison().
         output_path: Destination path.
     """
-    # TODO: Save results_df to CSV (with index=False).
-    pass
+    results_df.to_csv(output_path, index=False)
 
 
 def plot_pr_curves_top3(models, X_test, y_test, output_path="results/pr_curves.png"):
@@ -140,10 +235,30 @@ def plot_pr_curves_top3(models, X_test, y_test, output_path="results/pr_curves.p
         y_test: Test labels.
         output_path: Destination path for the PNG.
     """
-    # TODO: Compute PR-AUC for each model on the test set. Select the top 3.
-    #       Create a figure, plot each with PrecisionRecallDisplay.from_estimator
-    #       on the same axes. Title, save, close.
-    pass
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    pr_auc_scores = {}
+
+    for name, model in models.items():
+        y_prob = model.predict_proba(X_test)[:, 1]
+        pr_auc_scores[name] = average_precision_score(y_test, y_prob)
+
+    top3_names = sorted(pr_auc_scores, key=pr_auc_scores.get, reverse=True)[:3]
+
+    fig, ax = plt.subplots()
+
+    for name in top3_names:
+        PrecisionRecallDisplay.from_estimator(
+            models[name],
+            X_test,
+            y_test,
+            ax=ax,
+            name=name
+        )
+
+    ax.set_title("Top 3 PrecisionRecall Curves by PR AUC")
+    plt.savefig(output_path)
+    plt.close(fig)
 
 
 def plot_calibration_top3(models, X_test, y_test, output_path="results/calibration.png"):
@@ -157,9 +272,31 @@ def plot_calibration_top3(models, X_test, y_test, output_path="results/calibrati
         y_test: Test labels.
         output_path: Destination path for the PNG.
     """
-    # TODO: Same top 3 as PR curves. Create a figure, plot each with
-    #       CalibrationDisplay.from_estimator. Title, save, close.
-    pass
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    pr_auc_scores = {}
+
+    for name, model in models.items():
+        y_prob = model.predict_proba(X_test)[:, 1]
+        pr_auc_scores[name] = average_precision_score(y_test, y_prob)
+
+    top3_names = sorted(pr_auc_scores, key=pr_auc_scores.get, reverse=True)[:3]
+
+    fig, ax = plt.subplots()
+
+    for name in top3_names:
+        CalibrationDisplay.from_estimator(
+            models[name],
+            X_test,
+            y_test,
+            n_bins=10,
+            ax=ax,
+            name=name
+        )
+
+    ax.set_title("Top 3 Calibration Curves by PR-AUC")
+    plt.savefig(output_path)
+    plt.close(fig)
 
 
 def save_best_model(best_model, output_path="results/best_model.joblib"):
@@ -169,8 +306,8 @@ def save_best_model(best_model, output_path="results/best_model.joblib"):
         best_model: A fitted sklearn Pipeline.
         output_path: Destination path.
     """
-    # TODO: Call dump(best_model, output_path).
-    pass
+    dump(best_model, output_path)
+    
 
 
 def log_experiment(results_df, output_path="results/experiment_log.csv"):
@@ -184,11 +321,29 @@ def log_experiment(results_df, output_path="results/experiment_log.csv"):
         results_df: DataFrame from run_cv_comparison().
         output_path: Destination path.
     """
-    # TODO: Build a log DataFrame with columns: model_name, accuracy,
-    #       precision, recall, f1, pr_auc (use the mean values from
-    #       results_df), and a timestamp column with the current time.
-    #       Save to CSV.
-    pass
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    log_df = results_df[[
+        "model",
+        "accuracy_mean",
+        "precision_mean",
+        "recall_mean",
+        "f1_mean",
+        "pr_auc_mean"
+    ]].copy()
+
+    log_df = log_df.rename(columns={
+        "model": "model_name",
+        "accuracy_mean": "accuracy",
+        "precision_mean": "precision",
+        "recall_mean": "recall",
+        "f1_mean": "f1",
+        "pr_auc_mean": "pr_auc"
+    })
+
+    log_df["timestamp"] = datetime.now().isoformat()
+
+    log_df.to_csv(output_path, index=False)
 
 
 def find_tree_vs_linear_disagreement(rf_model, lr_model, X_test, y_test,
@@ -222,11 +377,35 @@ def find_tree_vs_linear_disagreement(rf_model, lr_model, X_test, y_test,
           - prob_diff (float): |rf_proba - lr_proba|
           - true_label (int): 0 or 1
     """
-    # TODO: Get predict_proba from both pipelines on X_test. Compute
-    #       absolute difference of P(churn=1). Find the sample with the
-    #       MAXIMUM difference (must be >= min_diff). Return the dict
-    #       with all six fields.
-    pass
+    rf_proba = rf_model.predict_proba(X_test)[:, 1]
+    lr_proba = lr_model.predict_proba(X_test)[:, 1]
+
+    prob_diff = np.abs(rf_proba - lr_proba)
+    sample_idx = int(np.argmax(prob_diff))
+
+    if prob_diff[sample_idx] < min_diff:
+        return None
+
+    if hasattr(X_test, "iloc"):
+        row = X_test.iloc[sample_idx]
+        feature_values = {name: float(row[name]) for name in feature_names}
+    else:
+        row = X_test[sample_idx]
+        feature_values = {name: float(value) for name, value in zip(feature_names, row)}
+
+    if hasattr(y_test, "iloc"):
+        true_label = int(y_test.iloc[sample_idx])
+    else:
+        true_label = int(y_test[sample_idx])
+
+    return {
+        "sample_idx": sample_idx,
+        "feature_values": feature_values,
+        "rf_proba": float(rf_proba[sample_idx]),
+        "lr_proba": float(lr_proba[sample_idx]),
+        "prob_diff": float(prob_diff[sample_idx]),
+        "true_label": true_label
+    }
 
 
 def main():
